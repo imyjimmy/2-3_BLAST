@@ -3,7 +3,6 @@ import java.util.Hashtable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.AbstractMap;
 
 /* For file input and outputs */
 import java.util.Scanner;
@@ -12,12 +11,16 @@ import java.io.FileNotFoundException;
 
 public class Blast{
   //String db_filename;
+  public static final int SLIDING_WINDOW_SIZE = 4;
   public Hashtable<String, String> db = new Hashtable<String, String>(); //when we first process the db.
 
   public String query;
   public Hashtable<String, Hashtable<String, ArrayList<Integer>>> q_kmer = new Hashtable<String, Hashtable<String, ArrayList<Integer>>>();
   //                kmer1  :{ entry1 : [1 , 3 , 6, 13], entry2 : [2, 7, 14, 21]}, kmer2... 
   public Hashtable<String, Hashtable<String, ArrayList<Integer>>> db_kmer = new Hashtable<String, Hashtable<String, ArrayList<Integer>>>();
+
+
+  public double threshold = 1.0;
 
   public void parseDB(String filename) {
     // System.out.println("public void parseFile(String filename) {");
@@ -82,17 +85,22 @@ public class Blast{
       System.out.println(parameters);
       b.start(parameters);  
 
-      //kmerizing.
-      b.kmerize(b.q_kmer, 4, b.query, "query");
+      //kmerizing query string.
+      b.kmerize(b.q_kmer, SLIDING_WINDOW_SIZE, b.query, "query");
 
       System.out.println(b.q_kmer);
 
       for (String k : b.db.keySet()) {
         String val = b.db.get(k);
-        b.kmerize(b.db_kmer, 4, val, k);
+        b.kmerize(b.db_kmer, SLIDING_WINDOW_SIZE, val, k);
       }
 
       System.out.println(b.db_kmer);
+
+      for (String key : b.q_kmer.keySet()) {
+        b.matchAll(key, b.q_kmer.get(key).get("query"), b.db_kmer, b.threshold);  //..., b.q_kmer.get(key), ...
+      }
+      
     }
   }
 
@@ -144,13 +152,92 @@ public class Blast{
   
   }
 
+  //ArrayList<ArrayList<String>>
+  public void matchAll(String query_kmer, ArrayList<Integer> queryIndices, Hashtable<String, Hashtable<String, ArrayList<Integer>>> target, double threshold) {
+    // for (String k : query.keySet()) {
+    //   String val = query.get(k);
+    // }
 
-  /*scratch */
-        //   Map.Entry<String,Integer> pair1 = new AbstractMap.SimpleEntry<>("something",1);
-        // Map.Entry<String,Integer> pair2 = new AbstractMap.SimpleEntry<>("something else",2);
-        // b.db_kmerHits.add(pair1);
-        // b.db_kmerHits.add(pair2);
-        // // b.kmerize(b.db_kmer, 4);  
-        // System.out.println(b.db_kmerHits);
+    Hashtable<String, ArrayList<Integer>> matches = target.get(query_kmer);
+
+    // System.out.println("key: " + query_kmer); 
+    
+    if (matches != null) {
+      // System.out.println("matches: " + matches.keySet());
+      
+      for (String dbName : matches.keySet()) {
+        ArrayList<Integer> indices = matches.get(dbName);
+        // System.out.println("match: " + dbName + " at: " + indices);
+        //this.db
+
+        batchExtendAlignment(query_kmer, queryIndices, dbName, this.db.get(dbName), indices);
+      }
+    }
+    
+  }
+
+  public void batchExtendAlignment(String query_kmer, ArrayList<Integer> queryIndices, String db_key, String db, ArrayList<Integer> db_indices) {
+    // System.out.println("query: " + this.query + "\nquerying kmer: " + query_kmer + "\nqueryIndices: " + queryIndices + "\ndb: " + db + "\ndb_indices: " + db_indices);
+    for (Integer q_index : queryIndices) {
+      for (Integer db_index : db_indices) {
+        extendSingleAlignment(query_kmer, q_index.intValue(), db_key, db, db_index.intValue());
+      }
+    } 
+  }
+
+  public void extendSingleAlignment(String query_kmer, int q_index, String db_key, String db, int db_index) {
+    System.out.println("in extendSingleAlignment");
+    System.out.println("query: " + this.query + "\nquerying_kmer: " + query_kmer + "\nq_index: " + q_index + "\ndb: " + db + "\ndb_index: " + db_index);
+    
+    //backwards
+    String back_qmatch = "";
+    String back_dbmatch = ""; 
+    int offset = 1;
+    int j = db_index - offset;
+    int back_i = q_index;
+    for (int i = q_index - 1 ; i > -1; i--) {
+      if (j > -1 && this.query.charAt(i) == db.charAt(j)) {
+        back_qmatch = "" + this.query.charAt(i) + back_qmatch;
+        back_dbmatch = "" + db.charAt(j) + back_dbmatch; 
+        back_i = i;
+      } else {
+        break;
+      }
+      j = db_index-offset;
+      offset++;
+    }
+    System.out.println("back-extended:");
+    System.out.println(back_qmatch + " at: " + back_i + "\n" + back_dbmatch + " at: " + j);
+
+    //forwards
+    String forward_qmatch = "";
+    String forward_dbmatch = "";
+    
+    offset = 0;
+    j = db_index + query_kmer.length() + offset;
+
+    int forward_i = q_index + query_kmer.length();
+    for (int i = forward_i; i < this.query.length(); i++) {
+      j = db_index + query_kmer.length() + offset;
+      if (j < db.length() && this.query.charAt(i) == db.charAt(j)) {
+        forward_qmatch += "" + this.query.charAt(i);
+        forward_dbmatch += "" + db.charAt(j);
+        forward_i++;
+      } else {
+        break;
+      }
+      offset++;
+    }
+
+    System.out.println("forward-extended:");
+    System.out.println(forward_qmatch + " at: " + forward_i + "\n" + forward_dbmatch + " at: " + j);
+
+    String extendedQuery = back_qmatch + query_kmer + forward_qmatch;
+    String extendedDB = back_dbmatch + query_kmer + forward_dbmatch;
+
+    System.out.println("results:");
+    System.out.println(extendedQuery + "\n" + extendedDB);
+
+  }
 
 }
