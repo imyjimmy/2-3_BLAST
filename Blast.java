@@ -120,6 +120,8 @@ public class Blast{
         b.matchAll(key, b.q_kmer.get(key).get("query"), b.db_kmer, b.threshold);  //..., b.q_kmer.get(key), ...
       }
       
+      System.out.println(b.hits);
+      b.mergeHits();
     }
   }
 
@@ -216,6 +218,7 @@ public class Blast{
       }
     }
     
+
   }
 
   public void batchExtendAlignment(String query_kmer, ArrayList<Integer> queryIndices, String db_key, String db, ArrayList<Integer> db_indices) {
@@ -384,43 +387,102 @@ public class Blast{
   }
 
   public void addHit(String query, int q_index, String db_key, String db_substr, int db_index) {
-    //db_hits
-    //query_hits
-    Hashtable<Integer, String> hits = db_hits.get(db_key);
-    if (hits == null) {
-      System.out.println("hits are null!");
-      hits = new Hashtable<Integer, String>(); 
+    //hits:   
+    //              "12:21" =>            {"db1"   => [12,445,] }
+    //              beg:end =>         { "db_name" => [query_indices] }
+
+    int endpos = q_index + query.length() - 1;
+    String q_key = Integer.toString(q_index) + ":" + Integer.toString(endpos);
+    // System.out.println(q_key); 
+
+    Hashtable<String, ArrayList<Integer>> hits_q_key = hits.get(q_key);
+    if (hits_q_key == null) {
+      hits_q_key = new Hashtable<String, ArrayList<Integer>>();
+    }
+
+    ArrayList<Integer> indices = hits_q_key.get(db_key);
+    if (indices == null) {
+      indices = new ArrayList<Integer>();
+    }
+
+    if (!indices.contains(db_index)) {
+      indices.add(db_index);
     } else {
-      System.out.println("hits are not null!");
+      System.out.println("already contains this index.");
     }
 
-    String result = hits.get(db_index);
-    if (result == null) {
-      hits.put(db_index, db_substr);  
-    } else if (result.compareTo(db_substr) == 0 ) {
-      System.out.println("found the same string, doing nothing.");
-    } else {
-      System.out.println("not the same string, mind blown, exiting.");
-      System.out.println("db name: " + db_key + " db index:" + db_index + "\n" + result + "\n" + db_substr);
-      System.out.println("query: " + query + " q_index: " + q_index);
-      // System.exit(1);
+    hits_q_key.put(db_key, indices);
+    hits.put(q_key, hits_q_key);
+
+  }
+
+  public void mergeHits() {
+    ArrayList<String> keys = new ArrayList<String>(hits.keySet());
+    for (int i = 0; i < keys.size(); i++) {
+      String key = keys.get(i);
+      String[] beg_end = key.split(":");
+      int begin = Integer.parseInt(beg_end[0]);
+      int end = Integer.parseInt(beg_end[1]);
+
+      ArrayList<String> keys_in_range = getKeysInRange(begin, end, key);
+
+      Hashtable<String, ArrayList<Integer>> hits_of_coord = hits.get(key);
+      ArrayList<String> dbs = new ArrayList<String>(hits_of_coord.keySet());
+
+      for (String key_in_r : keys_in_range) {
+        String[] r_beg_end = key_in_r.split(":");
+        int targetDistance = begin - Integer.parseInt(r_beg_end[0]); //looking for this distance.
+        //          -4     =    12 - 16
+        Hashtable<String, ArrayList<Integer>> hits_in_range = hits.get(key_in_r);
+        for (String db : dbs) { //a particular db name that appears in dbs, the hashtable for a given query key.
+          ArrayList<Integer> hits_in_merge_range = hits_in_range.get(db);
+          ArrayList<Integer> hits_in_db = hits_of_coord.get(db);
+          if (hits_in_merge_range == null) {
+            //remove...or skip...
+            //keys_in_range.remove(key_in_r);
+          } else { //hits in db is a thing.
+            //loook for a target index a certain distance away...
+            //begin - targetDistance
+            for (Integer _i : hits_in_db) {
+              int targetIndex = _i.intValue() - targetDistance;
+              if (hits_in_merge_range.contains(targetIndex)) {
+                //merge.
+                //meaning...? key, db, _i, key_in_r, _i.intValue() - target
+              }
+            }
+            
+          }          
+        }
+
+      }
+      
+      // for (String db : dbs) {
+      //   System.out.println(db);
+      //   ArrayList<Integer> match_indices = hits_of_coord.get(db);
+      // }
+    }
+  }
+
+  public ArrayList<String> getKeysInRange(int begin, int end, String exclude) {
+    ArrayList<String> keys = new ArrayList<String>(hits.keySet());
+
+    ArrayList<String> toReturn = new ArrayList<String>();
+    for (String key : keys) {
+      if (key.compareTo(exclude) != 0) {
+        String[] beg_end = key.split(":");
+        int _begin = Integer.parseInt(beg_end[0]);
+        int _end = Integer.parseInt(beg_end[1]);
+        if ( begin <= _begin && end >= _begin) { //sequence to merge occurs after
+          toReturn.add(key);
+        } else if ( _begin <= begin && _end >= begin) { //before
+          toReturn.add(key);
+        }
+      } else {
+        //skip
+      }
     }
 
-    db_hits.put(db_key, hits);
-
-    Hashtable<Integer, ArrayList<Integer>> q_hits = query_hits.get(db_key);
-    if (q_hits == null) {
-      q_hits = new Hashtable<Integer, ArrayList<Integer>>();
-    }
-
-    ArrayList<Integer> matches = q_hits.get(db_index);
-    if (matches == null) {
-      matches = new ArrayList<Integer>();
-    }
-    matches.add(q_index); //@todo, in order.
-
-    q_hits.put(db_index, matches);
-    query_hits.put(db_key, q_hits);
+    return toReturn;
   }
 
   public void printConsensus(String query, int q_index, String db_key, String db_substr, int db_index) {
