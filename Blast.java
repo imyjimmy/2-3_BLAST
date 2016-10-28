@@ -30,8 +30,8 @@ public class Blast{
   //           }
   
   public Hashtable<String, Hashtable<String, ArrayList<Integer>>> hits = new Hashtable<String, Hashtable<String, ArrayList<Integer>>>();
-  //              "db1" =>            {"3:12"   => [12,445,] }
-  //              db match =>         { "db_index:length" => [query_indices] }
+  //              {"3:12"   =>      { "db_1" => [12,445,] }
+  //              begin:end =>      { "db_name" => [indices_of_occurence] }
   
   public void parseDB(String filename) {
     // System.out.println("public void parseFile(String filename) {");
@@ -417,16 +417,19 @@ public class Blast{
   }
 
   public void mergeHits() {
-    ArrayList<String> keys = new ArrayList<String>(hits.keySet());
-    for (int i = 0; i < keys.size(); i++) {
-      String key = keys.get(i);
-      String[] beg_end = key.split(":");
+    ArrayList<String> coord_keys = new ArrayList<String>(hits.keySet());
+    System.out.println("aybitch");
+    System.out.println(coord_keys);
+    System.out.println("ay");
+    for (int i = 0; i < coord_keys.size(); i++) {
+      String coord_key = coord_keys.get(i);
+      String[] beg_end = coord_key.split(":");
       int begin = Integer.parseInt(beg_end[0]);
       int end = Integer.parseInt(beg_end[1]);
 
-      ArrayList<String> keys_in_range = getKeysInRange(begin, end, key);
+      ArrayList<String> keys_in_range = getKeysInRange(begin, end, coord_key);
 
-      Hashtable<String, ArrayList<Integer>> hits_of_coord = hits.get(key);
+      Hashtable<String, ArrayList<Integer>> hits_of_coord = hits.get(coord_key);
       ArrayList<String> dbs = new ArrayList<String>(hits_of_coord.keySet());
 
       for (String key_in_r : keys_in_range) {
@@ -448,7 +451,37 @@ public class Blast{
               if (hits_in_merge_range.contains(targetIndex)) {
                 //merge.
                 //meaning...? key, db, _i, key_in_r, _i.intValue() - target
-              }
+                // int distance = _i.intValue() - targetDistance;
+                System.out.println("should be merging here");
+                System.out.println("key (coord): " + coord_key + " db: " + db + " _i: " + _i + " key_in_r: " + key_in_r + " targetIndex: " + targetIndex);
+                
+                String sub_query = this.query.substring(begin, end+1);
+                String sub_db = this.db.get(db).substring(_i, _i + end - begin + 1);
+                System.out.println(sub_query + "\n" + sub_db);                
+                
+                System.out.println("~~~~");
+                
+                String sub_query_2 = this.query.substring(Integer.parseInt(r_beg_end[0]), Integer.parseInt(r_beg_end[1]) + 1);
+                String sub_db_2 = this.db.get(db).substring(targetIndex, targetIndex + sub_query_2.length());
+                System.out.println(sub_query_2 + "\n" + sub_db_2);
+
+                System.out.println("merging...");
+                // System.out.print(_i.intValue() + " " + targetIndex + "\n");
+
+                int min = Math.min(begin, Integer.parseInt(r_beg_end[0]));
+                int max = Math.max(end, Integer.parseInt(r_beg_end[1]));
+
+                int maxdistance = Math.abs(max - min + 1);
+                int db_start = Math.min(_i.intValue(), targetIndex);
+                // System.out.println(db_start);
+                // System.out.println(maxdistance);
+               
+                //put this in.
+                System.out.println(this.query.substring(min, max + 1));
+                System.out.println(this.db.get(db).substring(db_start, db_start + maxdistance));
+
+                
+              } 
             }
             
           }          
