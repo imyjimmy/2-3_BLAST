@@ -2,7 +2,9 @@
 import java.util.Hashtable;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
+
+//things
+import java.util.Iterator;
 
 /* For file input and outputs */
 import java.util.Scanner;
@@ -17,11 +19,10 @@ public class Blast{
   public Hashtable<String, String> db = new Hashtable<String, String>(); //when we first process the db.
 
   public String query = "";
-  public Hashtable<String, Hashtable<String, ArrayList<Integer>>> q_kmer = new Hashtable<String, Hashtable<String, ArrayList<Integer>>>();
-  //                kmer1  :{ entry1 : [1 , 3 , 6, 13], entry2 : [2, 7, 14, 21]}, kmer2... 
+  public Hashtable<String, ArrayList<Integer>> q_kmer = new Hashtable<String, ArrayList<Integer>>();
+  //                kmer1  : [1 , 3 , 6, 13], kmer2 : [2, 7, 14, 21], ... 
   public Hashtable<String, Hashtable<String, ArrayList<Integer>>> db_kmer = new Hashtable<String, Hashtable<String, ArrayList<Integer>>>();
-
-  // public Hashtable<String, Hashtable<Integer, ArrayList<Integer>>> db_hits = new Hashtable<String, Hashtable<Integer, ArrayList<Integer>>>();
+  // public Hashtable<Integer, ArrayList<Integer>>> db_hits = new Hashtable<String, Hashtable<Integer, ArrayList<Integer>>>();
   // db_hits
   // Hashtable<String, HashTable<Integer, String>>
   //           {"db1" => {3 => [12,21,45]}
@@ -30,7 +31,7 @@ public class Blast{
   //           }
   
   public Hashtable<String, Hashtable<String, ArrayList<Integer>>> hits = new Hashtable<String, Hashtable<String, ArrayList<Integer>>>();
-  //              {"3:12"   =>      { "db_1" => [12,445,] }
+  //              {"3:12"   =>      { "db_1" => [12,445,], "db_2" => [123.342] }
   //              begin:end =>      { "db_name" => [indices_of_occurence] }
   
   public void parseDB(String filename) {
@@ -79,7 +80,7 @@ public class Blast{
           }
           //...
         }
-        System.out.println("query: " + query);
+        // System.out.println("query: " + query);
     } catch (FileNotFoundException fnfe) {
       fnfe.printStackTrace();
     }    
@@ -99,29 +100,74 @@ public class Blast{
       System.exit(0);
     } else {
       for (int i = 0; i < args.length-1; i+=2) {
-          parameters.put(args[i],args[i+1]);
+        parameters.put(args[i],args[i+1]);
       }    
       System.out.println(parameters);
+      System.out.println("reading db, query files");
+      long startTime = System.currentTimeMillis();
       b.start(parameters);  
+      long endTime = System.currentTimeMillis();
+      System.out.println("Total execution time: " + (endTime - startTime) );
 
-      //kmerizing query string.
-      b.kmerize(b.q_kmer, sliding_window_size, b.query, "query");
+      System.out.println("kmerizing query string.");
+      startTime = System.currentTimeMillis();
+      b.kmerize(b.q_kmer, sliding_window_size, b.query);
+      endTime = System.currentTimeMillis();
+      System.out.println("Total execution time: " + (endTime - startTime) );
 
-      // System.out.println(b.q_kmer);
-
+      System.out.println("kmerizing-db");
+      startTime = System.currentTimeMillis();
       for (String k : b.db.keySet()) {
         String val = b.db.get(k);
         b.kmerize(b.db_kmer, sliding_window_size, val, k);
       }
+      endTime = System.currentTimeMillis();
+      System.out.println("Total execution time: " + (endTime - startTime) );
 
-      // System.out.println(b.db_kmer);
+      System.out.println("matching, size: " + b.q_kmer.keySet().size());
+      startTime = System.currentTimeMillis();
+
+      // for (int i = 0; i < b.query.length() - b.sliding_window_size + 1; i++) {
+      //   b.matchAll(b.query.substring(i, i + b.sliding_window_size), i, b.db_kmer, b.threshold);
+      // }
 
       for (String key : b.q_kmer.keySet()) {
-        b.matchAll(key, b.q_kmer.get(key).get("query"), b.db_kmer, b.threshold);  //..., b.q_kmer.get(key), ...
+        b.matchAll(key, b.q_kmer.get(key), b.db_kmer, b.threshold);  //..., b.q_kmer.get(key), ...
       }
+
+      endTime = System.currentTimeMillis();
+      System.out.println("Total execution time: " + (endTime - startTime) );
       
-      System.out.println(b.hits);
-      b.mergeHits();
+      // System.out.println(b.hits);
+      System.out.println("merging...");
+      startTime = System.currentTimeMillis();
+      boolean toMerge = true;
+      while (toMerge) {
+        System.out.println("merging hits");
+        toMerge = b.mergeHits();
+      }
+      endTime = System.currentTimeMillis();
+      System.out.println("Total execution time: " + (endTime - startTime) );
+
+      // System.out.println(b.hits);
+      //String query, int q_index, String db_key, String db_substr, int db_index
+      startTime = System.currentTimeMillis();
+      System.out.println("printing results");
+      for (String coord : b.hits.keySet()) {
+        String[] beg_end = coord.split(":");
+        int begin = Integer.parseInt(beg_end[0]);
+        int end = Integer.parseInt(beg_end[1]);
+
+        Hashtable<String, ArrayList<Integer>> table = b.hits.get(coord);
+        for (String db_key : table.keySet()) {
+          ArrayList<Integer> indices = table.get(db_key);
+          for (Integer _i : indices) {
+            b.printConsensus(b.query.substring(begin, end+1), begin, db_key, b.db.get(db_key).substring(_i, _i + end - begin + 1), _i);   
+          }
+        }
+      }
+      endTime = System.currentTimeMillis();
+      System.out.println("Total execution time: " + (endTime - startTime) );
     }
   }
 
@@ -170,8 +216,22 @@ public class Blast{
     this.parseQuery(q_filename);
   }
 
+  public void kmerize(Hashtable<String, ArrayList<Integer>> kmer_db, int window, String toKmerize) {
+    for (int i = 0; i < toKmerize.length() - window + 1; i++) {
+      String kmer = toKmerize.substring(i, i + window);
+      ArrayList<Integer> indices = kmer_db.get(kmer);
+
+      if (indices == null) {
+        indices = new ArrayList<Integer>();
+      }
+      indices.add(new Integer(i));
+
+      kmer_db.put(kmer, indices);
+    }
+  }
+
   public void kmerize(Hashtable<String, Hashtable<String, ArrayList<Integer>>> kmer_db, int window, String toKmerize, String key) {
-    for (int i = 0; i < toKmerize.length()-window+1; i++) {
+    for (int i = 0; i < toKmerize.length() - window + 1; i++) {
       // System.out.println("substring to kmerize: " + toKmerize.substring(i, i+window));
       // kmer_db.put(toKmerize.substring(i, i+window), new Integer(i));
       String kmer = toKmerize.substring(i, i+window);
@@ -201,31 +261,33 @@ public class Blast{
     // for (String k : query.keySet()) {
     //   String val = query.get(k);
     // }
-
+    // System.out.println(query_kmer);
     Hashtable<String, ArrayList<Integer>> matches = target.get(query_kmer);
 
     // System.out.println("key: " + query_kmer); 
     
     if (matches != null) {
-      // System.out.println("matches: " + matches.keySet());
+      // System.out.println("matches: " + matches.keySet().size());
       
       for (String dbName : matches.keySet()) {
         ArrayList<Integer> indices = matches.get(dbName);
         // System.out.println("match: " + dbName + " at: " + indices);
         //this.db
-
         batchExtendAlignment(query_kmer, queryIndices, dbName, this.db.get(dbName), indices);
       }
+    } else {
+      // System.out.println("matches are null bruh");
     }
-    
-
   }
 
   public void batchExtendAlignment(String query_kmer, ArrayList<Integer> queryIndices, String db_key, String db, ArrayList<Integer> db_indices) {
-    // System.out.println("query: " + this.query + "\nquerying kmer: " + query_kmer + "\nqueryIndices: " + queryIndices + "\ndb: " + db + "\ndb_indices: " + db_indices);
+    // System.out.println("query: " + this.query + "\nquerying kmer: " + query_kmer + "\nqueryIndices: " + queryIndex + "\ndb: " + db + "\ndb_indices: " + db_indices);
+    // System.out.println("inside batchExtendAlignment");
+    // System.out.println(queryIndices.size());
+    // System.out.println(db_indices.size());
     for (Integer q_index : queryIndices) {
       for (Integer db_index : db_indices) {
-        extendSingleAlignment(query_kmer, q_index.intValue(), db_key, db, db_index.intValue());
+        extendSingleAlignment(query_kmer, q_index, db_key, db, db_index.intValue());
       }
     } 
   }
@@ -281,11 +343,11 @@ public class Blast{
     String extendedDB = back_dbmatch + query_kmer + forward_dbmatch;
 
     //todo: extend query past exact matches, up to threshold.
-    System.out.println("querying_kmer: " + query_kmer + "\nq_index: " + back_q_index + "\ndbname: " + db_key + "\ndb_index: " + back_db_index);
-    System.out.println("results:");
-    System.out.println(extendedQuery + "\n" + extendedDB);
+    // System.out.println("querying_kmer: " + query_kmer + "\nq_index: " + back_q_index + "\ndbname: " + db_key + "\ndb_index: " + back_db_index);
+    // System.out.println("results:");
+    // System.out.println(extendedQuery + "\n" + extendedDB);
     if (! (this.threshold == 1.0)) {
-      System.out.println("extending query to threshold.");
+      // System.out.println("extending query to threshold.");
       extendToThreshold(extendedQuery, back_q_index, db_key, back_db_index);
     }
 
@@ -308,7 +370,6 @@ public class Blast{
 
     String db = this.db.get(db_key);
 
-
     while (match_fraction > this.threshold) {
       // System.out.println("inside while");
 
@@ -322,7 +383,7 @@ public class Blast{
             num_mismatches++;
             match_fraction = 1.0 - ((double) num_mismatches / (double) (match.length()+forward_qmatch.length()+back_i+1));
           }
-
+          //some kind of break here..
           back_qmatch = "" + this.query.charAt(q_index-1-back_i) + back_qmatch;
           back_dbmatch = "" + db.charAt(db_index-1-back_i) + back_dbmatch;
           back_i++;
@@ -383,7 +444,7 @@ public class Blast{
     // System.out.println(extendedQuery + "\n" + extendedDB);
 
     addHit(extendedQuery, q_index, db_key, extendedDB, db_index);
-    printConsensus(extendedQuery, q_index, db_key, extendedDB, db_index);
+    // printConsensus(extendedQuery, q_index, db_key, extendedDB, db_index);
   }
 
   public void addHit(String query, int q_index, String db_key, String db_substr, int db_index) {
@@ -408,7 +469,7 @@ public class Blast{
     if (!indices.contains(db_index)) {
       indices.add(db_index);
     } else {
-      System.out.println("already contains this index.");
+      // System.out.println("already contains this index.");
     }
 
     hits_q_key.put(db_key, indices);
@@ -416,11 +477,10 @@ public class Blast{
 
   }
 
-  public void mergeHits() {
+  public boolean mergeHits() {
+    boolean mergedThings = false;
+
     ArrayList<String> coord_keys = new ArrayList<String>(hits.keySet());
-    System.out.println("aybitch");
-    System.out.println(coord_keys);
-    System.out.println("ay");
     for (int i = 0; i < coord_keys.size(); i++) {
       String coord_key = coord_keys.get(i);
       String[] beg_end = coord_key.split(":");
@@ -441,31 +501,44 @@ public class Blast{
           ArrayList<Integer> hits_in_merge_range = hits_in_range.get(db);
           ArrayList<Integer> hits_in_db = hits_of_coord.get(db);
           if (hits_in_merge_range == null) {
+            // System.out.println("no hits in hits_in_merge_range");
             //remove...or skip...
             //keys_in_range.remove(key_in_r);
           } else { //hits in db is a thing.
             //loook for a target index a certain distance away...
             //begin - targetDistance
-            for (Integer _i : hits_in_db) {
+            
+            // for (Integer _i : hits_in_db) {
+            
+            // List<String> list = new ArrayList<String>();
+            
+            // for (Iterator<String> iterator = list.iterator(); iterator.hasNext(); ) {
+            //     String value = iterator.next();
+            //     if (value.length() > 5) {
+            //         iterator.remove();
+            //     }
+            // }
+            for ( Iterator<Integer> iterator = hits_in_db.iterator(); iterator.hasNext(); ) {  
+              Integer _i = iterator.next();
               int targetIndex = _i.intValue() - targetDistance;
               if (hits_in_merge_range.contains(targetIndex)) {
                 //merge.
                 //meaning...? key, db, _i, key_in_r, _i.intValue() - target
                 // int distance = _i.intValue() - targetDistance;
-                System.out.println("should be merging here");
-                System.out.println("key (coord): " + coord_key + " db: " + db + " _i: " + _i + " key_in_r: " + key_in_r + " targetIndex: " + targetIndex);
+                // System.out.println("should be merging here");
+                // System.out.println("key (coord): " + coord_key + " db: " + db + " _i: " + _i + " key_in_r: " + key_in_r + " targetIndex: " + targetIndex);
                 
                 String sub_query = this.query.substring(begin, end+1);
                 String sub_db = this.db.get(db).substring(_i, _i + end - begin + 1);
-                System.out.println(sub_query + "\n" + sub_db);                
+                // System.out.println(sub_query + "\n" + sub_db);                
                 
-                System.out.println("~~~~");
+                // System.out.println("~~~~");
                 
                 String sub_query_2 = this.query.substring(Integer.parseInt(r_beg_end[0]), Integer.parseInt(r_beg_end[1]) + 1);
                 String sub_db_2 = this.db.get(db).substring(targetIndex, targetIndex + sub_query_2.length());
-                System.out.println(sub_query_2 + "\n" + sub_db_2);
+                // System.out.println(sub_query_2 + "\n" + sub_db_2);
 
-                System.out.println("merging...");
+                // System.out.println("merging...");
                 // System.out.print(_i.intValue() + " " + targetIndex + "\n");
 
                 int min = Math.min(begin, Integer.parseInt(r_beg_end[0]));
@@ -477,10 +550,60 @@ public class Blast{
                 // System.out.println(maxdistance);
                
                 //put this in.
-                System.out.println(this.query.substring(min, max + 1));
-                System.out.println(this.db.get(db).substring(db_start, db_start + maxdistance));
+                // System.out.println(this.query.substring(min, max + 1));
+                // System.out.println(this.db.get(db).substring(db_start, db_start + maxdistance));
+                //use addHit()...String query, int q_index, String db_key, String db_substr, int db_index
+                addHit(this.query.substring(min, max + 1), min, db, this.db.get(db).substring(db_start, db_start + maxdistance), db_start);
+                // hashtable = hits.get("min:max")
+                // if null...
+                //
 
-                
+                //what to delete?
+                //  (key_in_r)
+                // targetIndex             targetIndex+sub_query_2.length()
+                // [                       ]
+                //     [           ]
+                //     _i          _i + end - begin + 1
+                //  (coord_key)
+                if (targetIndex <= _i && targetIndex+sub_query_2.length() >= _i + end - begin + 1) { // < or <= ?
+                  // System.out.println("scenario 1");
+                  iterator.remove();
+                }
+
+                //      (key_in_r)
+                //     targetIndex   targetIndex+sub_query_2.length()
+                //     [             ]
+                // [                       ]
+                // _i                      _i + end - begin + 1
+                //   (coord_key)
+                else if ( _i <= targetIndex && _i + end - begin + 1 >= targetIndex + sub_query_2.length()) {
+                  // System.out.println("scenario 2");
+                  hits.get(key_in_r).get(db).remove(new Integer(targetIndex));
+                }
+                // (key_in_r)
+                // targetIndex   targetIndex+sub_query_2.length()
+                // [             ]
+                //     [             ]
+                //     _i            _i + end - begin + 1
+                //     (coord_key)
+                else if ( targetIndex <= _i && _i + end - begin + 1 >= targetIndex + sub_query_2.length() ) {
+                  // System.out.println("scenario 3");
+                  // System.out.println(hits.get(key_in_r).get(db));
+                  // System.out.println(targetIndex);
+                  hits.get(key_in_r).get(db).remove(new Integer(targetIndex));
+                  iterator.remove();
+                }
+                //         targetIndex   targetIndex+sub_query_2.length()
+                //         [             ]
+                // [             ]
+                // _i            _i + end - begin + 1     
+                else if ( _i <= targetIndex && targetIndex + sub_query_2.length() >= _i + end - begin + 1) {           
+                  // System.out.println("scenario 4");
+                  hits.get(key_in_r).get(db).remove(new Integer(targetIndex));
+                  iterator.remove();
+                }
+
+                mergedThings = true;
               } 
             }
             
@@ -494,6 +617,8 @@ public class Blast{
       //   ArrayList<Integer> match_indices = hits_of_coord.get(db);
       // }
     }
+
+    return mergedThings;
   }
 
   public ArrayList<String> getKeysInRange(int begin, int end, String exclude) {
@@ -518,6 +643,7 @@ public class Blast{
     return toReturn;
   }
 
+//b.query.substring(begin, end+1), begin, db_key, b.db.get(db_key).substring(_i, _i + end - begin + 1), _i)
   public void printConsensus(String query, int q_index, String db_key, String db_substr, int db_index) {
     String buffer = "";
     int db_index_parse = db_index;
@@ -575,7 +701,10 @@ public class Blast{
     } else {
 
       //query, q_index, db_key, db_substr
-      System.out.println("query match at: " + q_index + " with db: " + db_key + " at: " + db_index); 
+      System.out.println("query match at: " + q_index + "," +  (q_index + query.length() -1) + " with db: " + db_key + " at: " + db_index + "," + (db_index+query.length() -1) + "\nentire db length: " + this.db.get(db_key).length());
+      // System.out.println("query:" + query + "\ndb:" + this.db.get(db_key));
+
+
       int bottom_index = 0;
       for (int i = 0; i < query.length(); i++) {             
           System.out.print(query.charAt(i));    
@@ -610,8 +739,4 @@ public class Blast{
     }
 
   }
-
-
-
-
 }
